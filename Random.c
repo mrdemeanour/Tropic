@@ -58,9 +58,9 @@
 #define BUTTON_DOWN (PINC & 1);
 #define BUTTON_UP   (PINC & 0);
 
-//Clock the D-Type flip-flop
-#define ASSERT_CLOCK PORTB |= 8
-#define DENY_CLOCK   PORTB &= ~8
+//Clock the D-Type flip-flop on PB4
+#define ASSERT_CLOCK PORTB |= (1 << 4)
+#define DENY_CLOCK   PORTB &= ~(1 << 4)
 
 // EPROM addresses
 #define EEPROM_BIT_DELAY_US 10
@@ -103,7 +103,9 @@ volatile uint8_t osc_status = 0;    //bits 0 and/or 1 are set if OSC0 or OSC1 is
 ISR(TIMER1_COMPA_vect) {
 	ASSERT_CLOCK;
     
-	inbits = ((PINB & 2) >> 1) | ((PIND & 8) >> 2) | 128;
+	//Input in PB3
+	inbits = ((PINB & (1 << 3)) >> 3) | 128;
+	LED_RED_TOGGLE;
     interrupts++;
 
 	DENY_CLOCK;	
@@ -164,6 +166,9 @@ void delay_us(uint16_t us) {
 	}	
 }
 
+/*
+ * Set up timer 1
+ */
 void setTimer1ISR(void) {
     cli();
     OCR1A = (TICKS_PER_US * bit_delay_us);
@@ -228,13 +233,11 @@ void setupRandom(void) {
     //echo to sane values. Otherwise EEPROM settings are used.
     uint8_t button_pressed = (PINC & 1);
     if (button_pressed) {
-        //cpu_mhz = 4;
         bit_delay_us = 250;
         input_mode = 'x';
         output_mode = 'h';
         echo = 1;
     } else {
-	    //cpu_mhz = eeprom_read_byte((uint8_t*) EEPROM_CPU_MHZ);
 	    bit_delay_us = eeprom_read_word((uint16_t*) EEPROM_BIT_DELAY_US);
 	    input_mode = eeprom_read_byte((uint8_t*) EEPROM_INPUT_MODE);
 	    output_mode = eeprom_read_byte((uint8_t*) EEPROM_OUTPUT_MODE);
@@ -244,28 +247,19 @@ void setupRandom(void) {
     //Enable output on PORTD5 and PORTD6 (Minimus LEDs)
 	LED_CONFIG;
 
-	//Switch on LEDB (Blue on Minimus)
+	//Switch on Red LED
     LED_RED_ON;
     
 	CPU_PRESCALE(CPU_16MHz);
 	
-	//Set pin B1 as input (Q2 from flip-flop).
-	//DDRB &= 2;
 
-	//Set pin B2 as output (to PRE2 on flip-flop).
-	//DDRB |= ~2;
-
-	//Set pin B3 as output (to flip-flop CLK2). Other pins are input.
+	//Set pin B4 as output (to flip-flop CLK2). Other pins are input.
 	//DDRB |= ~8;
-	DDRB = 0b00001000;	//PORT B all input (0) except B3 (1)
+	DDRB = 0b00010000;	//PORT B all input (0) except B4 (1)
 
-	//No 'pullup resistors' on inputs, positive output on pin B3 (CLK)
-	PORTB = 8;
-	
-	DDRC = 0b00000000;	//PORT C all input (0)
-	//No 'pullup resistors' on inputs, positive input on pin C0 (BUTTON)
-	PORTC = 1;
-    
+	//No 'pullup resistors' on inputs, positive output on pin B4 (CLK)
+	PORTB = 0b0010000;
+
     //Set the interrupt handlers
     setTimer1ISR();   
     
@@ -383,10 +377,11 @@ void output_byte(uint8_t b) {
 			//Print a newline every 16 bytes, and a space between bytes
 			if (++byte_count == 16) {
 				byte_count = 0;
-				fprintf(&USBSerialStream, "\n");
+				fprintf(&USBSerialStream, "\r\n");
 			} else {
 				fprintf(&USBSerialStream, " ");
 			}
+			LED_RED_TOGGLE;
 			break;
 			
 		case 'r':
@@ -424,38 +419,38 @@ void printStatus(void) {
     uint8_t prom_cpu_mhz = eeprom_read_byte((uint8_t*) EEPROM_CPU_MHZ);
     uint8_t prom_echo = eeprom_read_byte((uint8_t*) EEPROM_ECHO);
 
-    fprintf(&USBSerialStream, "Version: %s\n", VERSION);
+    fprintf(&USBSerialStream, "Version: %s\r\n", VERSION);
     
-    fprintf(&USBSerialStream, "Input mode: %c (PROM: %c)\n", input_mode, prom_input_mode);
-    fprintf(&USBSerialStream, "Output mode: %c (PROM: %c)\n", output_mode, prom_output_mode);
-    fprintf(&USBSerialStream, "Bit delay: %d (PROM: %d)\n", bit_delay_us, prom_bit_delay_us);
-    fprintf(&USBSerialStream, "CPU MHz: %d (PROM: %d)\n", cpu_mhz, prom_cpu_mhz);
-    fprintf(&USBSerialStream, "Echo: %d (PROM: %d)\n", echo, prom_echo);
-    fputc('\n', &USBSerialStream);
+    fprintf(&USBSerialStream, "Input mode: %c (PROM: %c)\r\n", input_mode, prom_input_mode);
+    fprintf(&USBSerialStream, "Output mode: %c (PROM: %c)\r\n", output_mode, prom_output_mode);
+    fprintf(&USBSerialStream, "Bit delay: %d (PROM: %d)\r\n", bit_delay_us, prom_bit_delay_us);
+    fprintf(&USBSerialStream, "CPU MHz: %d (PROM: %d)\r\n", cpu_mhz, prom_cpu_mhz);
+    fprintf(&USBSerialStream, "Echo: %d (PROM: %d)\r\n", echo, prom_echo);
+    fputc('\r\n', &USBSerialStream);
     
-    fprintf(&USBSerialStream, "Requested: %li\n", requested_bytes);
+    fprintf(&USBSerialStream, "Requested: %li\r\n", requested_bytes);
     fputs("OSC_STATUS: ", &USBSerialStream);
     print_binary(osc_status);
-    fputc('\n', &USBSerialStream);
+    fputs("\r\n", &USBSerialStream);
     fputs("TCCR1A: ", &USBSerialStream);
     print_binary(TCCR1A);
-    fputc('\n', &USBSerialStream);
+    fputs("\r\n", &USBSerialStream);
     fputs("TCCR1B: ", &USBSerialStream);
     print_binary(TCCR1B);
-    fputc('\n', &USBSerialStream);
+    fputs("\r\n", &USBSerialStream);
     fputs("TIMSK1: ", &USBSerialStream);
     print_binary(TIMSK1);
-    fputc('\n', &USBSerialStream);
+    fputs("\r\n", &USBSerialStream);
     fputs("OCR1A: ", &USBSerialStream);
     print_binary(OCR1A >> 8);
     print_binary(OCR1A & 0xFF);
-    fprintf(&USBSerialStream, " (%d)\n", OCR1A);
-    fprintf(&USBSerialStream, "Interrupts: %u\n", interrupts);
-    fprintf(&USBSerialStream, "Missed: %u\n", missed);
+    fprintf(&USBSerialStream, " (%d)\r\n", OCR1A);
+    fprintf(&USBSerialStream, "Interrupts: %u\r\n", interrupts);
+    fprintf(&USBSerialStream, "Missed: %u\r\n", missed);
     missed = 0;
-    fprintf(&USBSerialStream, "Last idle: %u\n", ticks_idle);
-    fprintf(&USBSerialStream, "Last work: %u\n", ticks_work);
-    fputc('\n', &USBSerialStream);
+    fprintf(&USBSerialStream, "Last idle: %u\r\n", ticks_idle);
+    fprintf(&USBSerialStream, "Last work: %u\r\n", ticks_work);
+    fputs("\r\n", &USBSerialStream);
 }
 /*
  * Parse a command.
@@ -482,10 +477,10 @@ void handleCommand(uint8_t* command) {
                 case 'e':   //Pass bits through hamming code
                 case '2':   //Output both bits
                     input_mode = command[1];
-                    fputs("OK\n", &USBSerialStream);
+                    fputs("OK\r\n", &USBSerialStream);
                     break;
                 default:
-                    fputs("Invalid command (i[b|d|a|x|v|h|2])\n", &USBSerialStream);
+                    fputs("Invalid command (i[b|d|a|x|v|h|2])\r\n", &USBSerialStream);
             }
             break;
 
@@ -496,10 +491,10 @@ void handleCommand(uint8_t* command) {
                 case 'r':
                 case 'c':
                     output_mode = command[1];
-                    fputs("OK\n", &USBSerialStream);
+                    fputs("OK\r\n", &USBSerialStream);
                     break;
                 default:
-                    fputs("Invalid command (o[b|h|r|c])\n", &USBSerialStream);
+                    fputs("Invalid command (o[b|h|r|c])\r\n", &USBSerialStream);
             }
     	    break;
     	
@@ -509,9 +504,9 @@ void handleCommand(uint8_t* command) {
             if (num >= 5) {
                 bit_delay_us = num;
                 setTimer1ISR();
-                fputs("OK\n", &USBSerialStream);
+                fputs("OK\r\n", &USBSerialStream);
             } else {
-                fputs("Invalid decimal number (d<num>)\n", &USBSerialStream);
+                fputs("Invalid decimal number (d<num>)\r\n", &USBSerialStream);
             }            
             break;
             
@@ -521,16 +516,16 @@ void handleCommand(uint8_t* command) {
            	eeprom_write_byte((uint8_t*)EEPROM_INPUT_MODE, input_mode);
            	eeprom_write_byte((uint8_t*)EEPROM_CPU_MHZ, cpu_mhz);
            	eeprom_write_byte((uint8_t*)EEPROM_ECHO, echo);
-            fputs("OK\n", &USBSerialStream);
+            fputs("OK\r\n", &USBSerialStream);
             break;        
 
     	case 'm':
     	    num = parse_num(&command[1]);
     	    if (num != -1) {
         	    cpu_mhz = num;
-                fputs("OK\n", &USBSerialStream);
+                fputs("OK\r\n", &USBSerialStream);
     	    } else {
-                fputs("Invalid decimal number (d<num>)\n", &USBSerialStream);
+                fputs("Invalid decimal number (d<num>)\r\n", &USBSerialStream);
             }
     	    break;
 
@@ -540,9 +535,10 @@ void handleCommand(uint8_t* command) {
                 byte_count = 0;
                 requested_bytes = num;
                 startTimerISR();
+                fputs("\r\n", &USBSerialStream);
                 // Causes eventLoop to start outputting. 
             } else {
-                fputs("Invalid command (r<num>)\n", &USBSerialStream);
+                fputs("Invalid command (r<num>)\r\n", &USBSerialStream);
             }
         	break;
         
@@ -556,11 +552,11 @@ void handleCommand(uint8_t* command) {
 
         case 'q':
             requested_bytes = 0;
-            fputs("OK\n", &USBSerialStream);
+            fputs("OK\r\n", &USBSerialStream);
             break;
 
     	default:
-            fputs("Invalid command (i|o|p|r|s|q)\n", &USBSerialStream);
+            fputs("Invalid command (i|o|p|r|s|q)\r\n", &USBSerialStream);
 	}
     command[0] = 0;
 }
@@ -611,13 +607,11 @@ void processRawBits(void) {
     
     cli();
     process_bits = (inbits & 128);
-    if (process_bits != 0) {
-        b = inbits & 7;
-        inbits = 0;
-    }
+    b = inbits & 1;
     sei();
     
     if (process_bits != 0) {
+    	LED_BLUE_TOGGLE;
         switch(input_mode) {
             //Only PINB3
             case 'b':
@@ -698,10 +692,13 @@ void processRawBits(void) {
 		    if (randbits == 8) {
     		    randbits = 0;
                 if (requested_bytes > 0 || output_mode == 'c') {                
-        		    //LED_BLUE_TOGGLE;
+        		    //LED_RED_TOGGLE;
     		        output_byte(randbyte);
     		        requested_bytes--;
-                }                
+                } else {
+                	//Fulfilled request, and not continuous output mode
+                	stopTimerISR();
+                }
 		    }
         }        
     } else {

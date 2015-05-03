@@ -192,7 +192,7 @@ void setupRandom(void) {
 	LED_CONFIG;
 
 	//Switch on Red LED
-    LED_RED_ON;
+    //LED_RED_ON;
     
 	CPU_PRESCALE(CPU_16MHz);
 	

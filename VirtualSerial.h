@@ -45,7 +45,7 @@
 		#include <stdio.h>
 
 		#include "Descriptors.h"
-		#include "Random.h"
+		#include "Tropic.h"
 
 		#include <LUFA/Drivers/Board/LEDs.h>
 		#include <LUFA/Drivers/USB/USB.h>

@@ -43,9 +43,10 @@
 #define CPU_62kHz       0x08
 
 //On-board LED
-//MINIMUS LEDs are active-low.
+//Set the LED pins as outputs.
 #define LED_CONFIG	(DDRD |= (3<<5))
 
+//MINIMUS LEDs are active-low.
 #define LED_BLUE_OFF (PORTD |= (1<<5))
 #define LED_BLUE_ON (PORTD &= ~(1<<5))
 #define LED_BLUE_TOGGLE  (PORTD ^= (1<<5))
@@ -55,8 +56,8 @@
 #define LED_RED_TOGGLE  (PORTD ^= (1<<6))
 
 //Button
-#define BUTTON_DOWN (PINC & 1);
-#define BUTTON_UP   (PINC & 0);
+#define BUTTON_DOWN (~PINB & 2)
+#define BUTTON_UP   (PINB & 2)
 
 //Clock the D-Type flip-flop on PB4
 #define ASSERT_CLOCK PORTB |= (1 << 4)
@@ -68,9 +69,6 @@
 #define EEPROM_INPUT_MODE   13
 #define EEPROM_OUTPUT_MODE  14
 #define EEPROM_ECHO         15
-
-// Flags
-#define HAMMING_INPUT_READY 1
 
 #ifdef __AVR_ATmega32U2__
 #endif
@@ -229,20 +227,6 @@ void setAdcISR() {
 
 
 void setupRandom(void) {
-    //Asserting PINC0 forces sample interval, MHz, input mode, output mode and 
-    //echo to sane values. Otherwise EEPROM settings are used.
-    uint8_t button_pressed = (PINC & 1);
-    if (button_pressed) {
-        bit_delay_us = 250;
-        input_mode = 'x';
-        output_mode = 'h';
-        echo = 1;
-    } else {
-	    bit_delay_us = eeprom_read_word((uint16_t*) EEPROM_BIT_DELAY_US);
-	    input_mode = eeprom_read_byte((uint8_t*) EEPROM_INPUT_MODE);
-	    output_mode = eeprom_read_byte((uint8_t*) EEPROM_OUTPUT_MODE);
-	    echo = eeprom_read_byte((uint8_t*) EEPROM_ECHO);
-    }    
 
     //Enable output on PORTD5 and PORTD6 (Minimus LEDs)
 	LED_CONFIG;
@@ -254,11 +238,25 @@ void setupRandom(void) {
 	
 
 	//Set pin B4 as output (to flip-flop CLK2). Other pins are input.
-	//DDRB |= ~8;
-	DDRB = 0b00010000;	//PORT B all input (0) except B4 (1)
+	//PORT B all input (0) except B4. B3 is input from flipflop. B1 is input from button.
+	DDRB = 0b00010000;
 
-	//No 'pullup resistors' on inputs, positive output on pin B4 (CLK)
-	PORTB = 0b0010000;
+	//pullup on pin B1 (input)
+	PORTB = 0b00000010;
+
+    //Asserting PINB1 forces sample interval, MHz, input mode, output mode and
+    //echo to sane values. Otherwise EEPROM settings are used.
+    if (BUTTON_DOWN) {
+        bit_delay_us = 250;
+        input_mode = 'x';
+        output_mode = 'h';
+        echo = 1;
+    } else {
+	    bit_delay_us = eeprom_read_word((uint16_t*) EEPROM_BIT_DELAY_US);
+	    input_mode = eeprom_read_byte((uint8_t*) EEPROM_INPUT_MODE);
+	    output_mode = eeprom_read_byte((uint8_t*) EEPROM_OUTPUT_MODE);
+	    echo = eeprom_read_byte((uint8_t*) EEPROM_ECHO);
+    }
 
     //Set the interrupt handlers
     setTimer1ISR();   
@@ -289,51 +287,6 @@ void idle(void) {
     ticks_work_start = TCNT1;
 }
 
-/*
- * Compute a hamming code on 4-bit value b and return just the parity bits.
- * https://wdjoyner.wordpress.com/2008/04/24/circle-decoding-of-the-743-hamming-code/
- */
-uint8_t g[] = {
-    0b1000,
-    0b0100,
-    0b0010,
-    0b0001,
-    0b1011,
-    0b1101,
-    0b1110
-};
-uint16_t p = 0b0110100110010110;
-uint8_t parity[] = {
-    0,  //0
-    1,  //1,
-    1,   //1,
-    0,  //2,
-    1,  //1,
-    0,  //2,
-    0,  //2,
-    1,  //3,
-    1,  //1,
-    0,   //2,
-    0,  //2,
-    1,  //3,
-    0,  //2,
-    1,  //3,
-    1,  //3,
-    0  //4
-};
-uint8_t ecc_hamming(uint8_t b) {
-    uint8_t r = 0;
-    
-    b &= 15;
-    for (uint8_t i = 0; i < 7; i++) {
-        //Sum modulo-2 the products of the 4-bit b and the respective 
-        //entries in the parity table.
-        r <<= 1;
-        r |= ((p >> (b & g[i])) & 1);
-        //r |= parity[b & g[i]];
-    }
-    return r & 7;    
-}
 
 /*
 The possible sample modes are:
@@ -341,7 +294,6 @@ The possible sample modes are:
 - Just PIND3
 - PINB1 XOR PIND3
 - PINB1 VN PIND3
-- Pearson Hash of 8 raw b1 and d3 bits
 */
 
 
@@ -373,7 +325,7 @@ void output_byte(uint8_t b) {
 			break;
 
 		case 'h':
-			fprintf(&USBSerialStream, "%0x", b);
+			fprintf(&USBSerialStream, "%02x", b);
 			//Print a newline every 16 bytes, and a space between bytes
 			if (++byte_count == 16) {
 				byte_count = 0;
@@ -426,32 +378,44 @@ void printStatus(void) {
     fprintf(&USBSerialStream, "Bit delay: %d (PROM: %d)\r\n", bit_delay_us, prom_bit_delay_us);
     fprintf(&USBSerialStream, "CPU MHz: %d (PROM: %d)\r\n", cpu_mhz, prom_cpu_mhz);
     fprintf(&USBSerialStream, "Echo: %d (PROM: %d)\r\n", echo, prom_echo);
-    fputc('\r\n', &USBSerialStream);
+    fputs("\r\n", &USBSerialStream);
     
     fprintf(&USBSerialStream, "Requested: %li\r\n", requested_bytes);
     fputs("OSC_STATUS: ", &USBSerialStream);
     print_binary(osc_status);
     fputs("\r\n", &USBSerialStream);
+
     fputs("TCCR1A: ", &USBSerialStream);
     print_binary(TCCR1A);
     fputs("\r\n", &USBSerialStream);
+
     fputs("TCCR1B: ", &USBSerialStream);
     print_binary(TCCR1B);
     fputs("\r\n", &USBSerialStream);
+
     fputs("TIMSK1: ", &USBSerialStream);
     print_binary(TIMSK1);
     fputs("\r\n", &USBSerialStream);
+
     fputs("OCR1A: ", &USBSerialStream);
     print_binary(OCR1A >> 8);
     print_binary(OCR1A & 0xFF);
     fprintf(&USBSerialStream, " (%d)\r\n", OCR1A);
+
     fprintf(&USBSerialStream, "Interrupts: %u\r\n", interrupts);
+
     fprintf(&USBSerialStream, "Missed: %u\r\n", missed);
     missed = 0;
+
     fprintf(&USBSerialStream, "Last idle: %u\r\n", ticks_idle);
+
     fprintf(&USBSerialStream, "Last work: %u\r\n", ticks_work);
-    fputs("\r\n", &USBSerialStream);
+
+	fprintf(&USBSerialStream, "PINB: %0x\r\n", PINB & ~(128 + 8));
+
+	fputs("\r\n", &USBSerialStream);
 }
+
 /*
  * Parse a command.
  * Commands that request data reset any command in progress, and set global variables;
@@ -474,7 +438,6 @@ void handleCommand(uint8_t* command) {
                 case 'a':   //ADC0
                 case 'x':   //XOR the pins
                 case 'v':   //VN the pins
-                case 'e':   //Pass bits through hamming code
                 case '2':   //Output both bits
                     input_mode = command[1];
                     fputs("OK\r\n", &USBSerialStream);
@@ -534,9 +497,6 @@ void handleCommand(uint8_t* command) {
             if (num != -1) {
                 byte_count = 0;
                 requested_bytes = num;
-                startTimerISR();
-                fputs("\r\n", &USBSerialStream);
-                // Causes eventLoop to start outputting. 
             } else {
                 fputs("Invalid command (r<num>)\r\n", &USBSerialStream);
             }
@@ -577,6 +537,9 @@ void checkForCommand(void) {
 		b &= 0xFF;
         if (echo) {
         	fputc(b, &USBSerialStream);
+        	if (b == 0x0D) {
+        		fputc(0x0A, &USBSerialStream);
+        	}
         }        
 		if (len > 8) {
 			len = 0;
@@ -597,9 +560,6 @@ void processRawBits(void) {
     uint8_t process_bits = 0;
     static uint8_t randbyte = 0;
     static uint8_t randbits = 0;
-    static uint16_t hamming_output = 0;
-    static uint8_t hamming_input = 0;
-    static uint8_t hamming_output_bits = 0;
   
     if (!(requested_bytes > 0 || output_mode == 'c')) {
         return;
@@ -658,49 +618,20 @@ void processRawBits(void) {
                 randbits += 1;
                 break;
                 
-            case 'e':
-                //Compute Hamming code over 4 bits.
-                //hamming_input is 2 or 4 raw bits.
-                hamming_input <<= 2;
-                //Shift in lower two bits from entropy source
-                hamming_input |= (b & 3);
-                if ((flags ^= HAMMING_INPUT_READY) == HAMMING_INPUT_READY) {
-                    hamming_output <<= 3;
-                    hamming_output |= ecc_hamming(hamming_input);
-                    hamming_output_bits += 3;
-                }
-                break;
-
             default: ;
         }
         
-        switch(input_mode) {
-            case 'e':
-                if (requested_bytes > 0 || output_mode == 'c') {
-                    if (hamming_output_bits >= 8) {
-                        //If there are 9 bits, we want the MS 8 bits in the low-order byte.
-                        uint8_t hamming_output_byte = hamming_output >> (hamming_output_bits - 8);
-                        hamming_output_bits -= 8;
-        		        //LED_BLUE_TOGGLE;
-        		        output_byte(hamming_output_byte);
-        		        requested_bytes--;
-                    }
-                }                
-                break;
-                
-        default:
-		    if (randbits == 8) {
-    		    randbits = 0;
-                if (requested_bytes > 0 || output_mode == 'c') {                
-        		    //LED_RED_TOGGLE;
-    		        output_byte(randbyte);
-    		        requested_bytes--;
-                } else {
-                	//Fulfilled request, and not continuous output mode
-                	stopTimerISR();
-                }
-		    }
-        }        
+		if (randbits == 8) {
+			randbits = 0;
+			if (requested_bytes > 0 || output_mode == 'c') {
+				//LED_RED_TOGGLE;
+				output_byte(randbyte);
+				requested_bytes--;
+			} else {
+				//Fulfilled request, and not continuous output mode
+				stopTimerISR();
+			}
+		}
     } else {
         missed++;
     }
@@ -725,9 +656,7 @@ uint8_t checkOscillatorStatus(void) {
  * - input byte ready
  */
 void handleRandomEvent(void) {
-	//if (checkOscillatorStatus() == 0) {
-		processRawBits();
-	//}
+	processRawBits();
 	checkForCommand();
 	idle();
 }

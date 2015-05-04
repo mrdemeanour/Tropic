@@ -14,14 +14,15 @@
 MCU          = atmega32u2
 ARCH         = AVR8
 BOARD        = MINIMUS
-F_CPU        = 16000000
-F_USB        = $(F_CPU)
+F_CPU        = 8000000
+F_USB        = 16000000
 OPTIMIZATION = s
 TARGET       = Tropic
 SRC          = VirtualSerial.c Descriptors.c Tropic.c $(LUFA_SRC_USB) $(LUFA_SRC_USBCLASS)
 LUFA_PATH    = LUFA
 CC_FLAGS     = -DUSE_LUFA_CONFIG_HEADER -IConfig/
 LD_FLAGS     =
+
 
 # Default target
 all:

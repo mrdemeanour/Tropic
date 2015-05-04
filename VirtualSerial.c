@@ -66,37 +66,6 @@ USB_ClassInfo_CDC_Device_t VirtualSerial_CDC_Interface =
 			},
 	};
 
-/** Standard file stream for the CDC interface when set up, so that the virtual CDC COM port can be
- *  used like any regular character stream in the C APIs.
- */
-
-
-/** Main program entry point. This routine contains the overall program flow, including initial
- *  setup of all components and the main program loop.
- */
-int main(void)
-{
-	SetupHardware();
-	_delay_ms(1000);
-
-	/* Create a regular character stream for the interface so that it can be used with the stdio.h functions */
-	CDC_Device_CreateStream(&VirtualSerial_CDC_Interface, &USBSerialStream);
-
-	//LEDs_SetAllLEDs(LEDMASK_USB_NOTREADY); //LED_RED
-	GlobalInterruptEnable();
-
-	setupRandom();
-
-	for (;;)
-	{
-		/* Must throw away unused bytes from the host, or it will lock up while waiting for the device */
-		//CDC_Device_ReceiveByte(&VirtualSerial_CDC_Interface);
-		handleRandomEvent();
-
-		CDC_Device_USBTask(&VirtualSerial_CDC_Interface);
-		USB_USBTask();
-	}
-}
 
 /** Configures the board hardware and chip peripherals for the demo's functionality. */
 void SetupHardware(void)
@@ -107,7 +76,7 @@ void SetupHardware(void)
 	wdt_disable();
 
 	/* Disable clock division */
-	clock_prescale_set(clock_div_1);
+	//clock_prescale_set(clock_div_1);
 #elif (ARCH == ARCH_XMEGA)
 	/* Start the PLL to multiply the 2MHz RC oscillator to 32MHz and switch the CPU core to run from it */
 	XMEGACLK_StartPLL(CLOCK_SRC_INT_RC2MHZ, 2000000, F_CPU);

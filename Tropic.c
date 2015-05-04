@@ -42,7 +42,7 @@ uint8_t echo;
 
 int32_t requested_bytes = 0;
 uint8_t byte_count = 0;
-uint16_t missed = 0;    //number of times PRB was called when no bit was available.
+uint16_t missed = 0;     //number of times PRB was called when no bit was available.
 uint16_t interrupts = 0;
 uint16_t ticks_idle = 0;
 uint16_t ticks_work = 0;
@@ -194,9 +194,6 @@ void setupRandom(void) {
 	//Switch on Red LED
     //LED_RED_ON;
     
-	CPU_PRESCALE(CPU_16MHz);
-	
-
 	//Set pin B4 as output (to flip-flop CLK2). Other pins are input.
 	//PORT B all input (0) except B4. B3 is input from flipflop. B1 is input from button.
 	DDRB = 0b00010000;
@@ -208,7 +205,7 @@ void setupRandom(void) {
     //echo to sane values. Otherwise EEPROM settings are used.
     if (BUTTON_DOWN) {
         bit_delay_us = 250;
-        input_mode = 'x';
+        input_mode = 'b';
         output_mode = 'h';
         echo = 1;
     } else {
@@ -217,6 +214,8 @@ void setupRandom(void) {
 	    output_mode = eeprom_read_byte((uint8_t*) EEPROM_OUTPUT_MODE);
 	    echo = eeprom_read_byte((uint8_t*) EEPROM_ECHO);
     }
+
+	CPU_PRESCALE(CPU_8MHz);
 
     //Set the interrupt handlers
     setTimer1ISR();   
@@ -328,7 +327,6 @@ void printStatus(void) {
     uint8_t prom_input_mode = eeprom_read_byte((uint8_t*) EEPROM_INPUT_MODE);
     uint8_t prom_output_mode = eeprom_read_byte((uint8_t*) EEPROM_OUTPUT_MODE);
     uint16_t prom_bit_delay_us = eeprom_read_word((uint16_t*) EEPROM_BIT_DELAY_US);
-    uint8_t prom_cpu_mhz = eeprom_read_byte((uint8_t*) EEPROM_CPU_MHZ);
     uint8_t prom_echo = eeprom_read_byte((uint8_t*) EEPROM_ECHO);
 
     fprintf(&USBSerialStream, "Version: %s\r\n", VERSION);
@@ -336,7 +334,6 @@ void printStatus(void) {
     fprintf(&USBSerialStream, "Input mode: %c (PROM: %c)\r\n", input_mode, prom_input_mode);
     fprintf(&USBSerialStream, "Output mode: %c (PROM: %c)\r\n", output_mode, prom_output_mode);
     fprintf(&USBSerialStream, "Bit delay: %d (PROM: %d)\r\n", bit_delay_us, prom_bit_delay_us);
-    fprintf(&USBSerialStream, "CPU MHz: %d (PROM: %d)\r\n", cpu_mhz, prom_cpu_mhz);
     fprintf(&USBSerialStream, "Echo: %d (PROM: %d)\r\n", echo, prom_echo);
     fputs("\r\n", &USBSerialStream);
     
@@ -426,7 +423,6 @@ void handleCommand(uint8_t* command) {
             // Don't set a bit-delay smaller than 5 microseconds
             if (num >= 5) {
                 bit_delay_us = num;
-                setTimer1ISR();
                 fputs("OK\r\n", &USBSerialStream);
             } else {
                 fputs("Invalid decimal number (d<num>)\r\n", &USBSerialStream);
@@ -437,7 +433,6 @@ void handleCommand(uint8_t* command) {
            	eeprom_write_word((uint16_t*)EEPROM_BIT_DELAY_US, bit_delay_us);
            	eeprom_write_byte((uint8_t*)EEPROM_OUTPUT_MODE, output_mode);
            	eeprom_write_byte((uint8_t*)EEPROM_INPUT_MODE, input_mode);
-           	eeprom_write_byte((uint8_t*)EEPROM_CPU_MHZ, cpu_mhz);
            	eeprom_write_byte((uint8_t*)EEPROM_ECHO, echo);
             fputs("OK\r\n", &USBSerialStream);
             break;        
@@ -621,3 +616,29 @@ void handleRandomEvent(void) {
 	idle();
 }
 
+
+/** Main program entry point. This routine contains the overall program flow, including initial
+ *  setup of all components and the main program loop.
+ */
+int main(void)
+{
+	setupRandom();
+
+	SetupHardware();
+
+	/* Create a regular character stream for the interface so that it can be used with the stdio.h functions */
+	CDC_Device_CreateStream(&VirtualSerial_CDC_Interface, &USBSerialStream);
+
+	//LEDs_SetAllLEDs(LEDMASK_USB_NOTREADY); //LED_RED
+	GlobalInterruptEnable();
+
+	for (;;)
+	{
+		/* Must throw away unused bytes from the host, or it will lock up while waiting for the device */
+		//CDC_Device_ReceiveByte(&VirtualSerial_CDC_Interface);
+		handleRandomEvent();
+
+		CDC_Device_USBTask(&VirtualSerial_CDC_Interface);
+		USB_USBTask();
+	}
+}

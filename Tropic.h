@@ -1,6 +1,6 @@
 #include <LUFA/Drivers/USB/USB.h>
 
-#define VERSION         "1.03"
+#define VERSION         "1.04"
 
 #define TICKS_PER_US 4
 
@@ -38,7 +38,6 @@
 
 // EPROM addresses
 #define EEPROM_BIT_DELAY_US 10
-#define EEPROM_CPU_MHZ      12
 #define EEPROM_INPUT_MODE   13
 #define EEPROM_OUTPUT_MODE  14
 #define EEPROM_ECHO         15
